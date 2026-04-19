@@ -1,113 +1,163 @@
-// src/services/api.js
-import axios from 'axios';
-import { authAPI } from './authAPI';
+// src/services/api.js  ← ĐÃ SỬA
+// Lỗi cũ trong authAPI.js: gọi /api/auth/login — endpoint không tồn tại trong BE
+// BE thực tế:
+//   POST /login          → { userName, userPassword }
+//   POST /registration   → User entity với userDetails nested
+//   GET  /products       → List<Product> (productName, discription, category string)
+//   POST /admin/products → Product entity
+//   GET  /users          → List<User>
+//   GET  /order          → List<Order>
+//   GET  /api/payments   → List<Payment>
 
-const API_BASE_URL = 'http://localhost:8080/api';
+import axios from 'axios'
 
-const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
-});
+const BASE = 'http://localhost:8080'
 
-// Interceptor: Tự động thêm JWT vào header
-api.interceptors.request.use(
-    (config) => {
-        const token = authAPI.getToken();
-        if (token) {
-            config.headers.Authorization = `Bearer ${token}`;
-        }
-        return config;
-    },
-    (error) => {
-        return Promise.reject(error);
-    }
-);
+export const http = axios.create({
+    baseURL: BASE,
+    withCredentials: true,
+    timeout: 10000,
+})
 
-// Interceptor: Xử lý lỗi 401
-api.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        if (error.response?.status === 401) {
-            authAPI.logout();
-            window.location.href = '/admin/login';
-        }
-        return Promise.reject(error);
-    }
-);
+// ─── Auth local helpers ──────────────────────────────────────────
+export const getUser = () => { try { return JSON.parse(localStorage.getItem('user')) } catch { return null } }
+export const setUser = (u) => localStorage.setItem('user', JSON.stringify(u))
+export const removeUser = () => { localStorage.removeItem('user'); localStorage.removeItem('cartId') }
+export const getCartId = () => localStorage.getItem('cartId') || ''
+export const setCartId = (id) => localStorage.setItem('cartId', String(id))
 
-// ==================== PRODUCTS ====================
-export const productAPI = {
-    getAll: () => api.get('/products'),
-    getById: (id) => api.get(`/products/${id}`),
-    create: (product) => api.post('/products', product),
-    update: (id, product) => api.put(`/products/${id}`, product),
-    delete: (id) => api.delete(`/products/${id}`),
-    getByCategory: (categoryId) => api.get(`/products/category/${categoryId}`),
-};
+// ─── USER SERVICE — routed via gateway → port 8811 ───────────────
+// POST /login → { userName, userPassword }
+// Trả về: { id, userName, role, userDetails, active }
+export const login = (userName, userPassword) =>
+    http.post('/login', { userName, userPassword })
 
-// ==================== CATEGORIES ====================
-export const categoryAPI = {
-    getAll: () => api.get('/categories'),
-    getById: (id) => api.get(`/categories/${id}`),
-    create: (category) => api.post('/categories', category),
-    update: (id, category) => api.put(`/categories/${id}`, category),
-    delete: (id) => api.delete(`/categories/${id}`),
-};
+// POST /registration → User entity (userName, userPassword, userDetails: {...})
+export const register = (body) => http.post('/registration', body)
 
-// ==================== ORDERS ====================
-export const orderAPI = {
-    getAll: () => api.get('/orders'),
-    getById: (id) => api.get(`/orders/${id}`),
-    create: (order) => api.post('/orders', order),
-    updateStatus: (id, status) => api.put(`/orders/${id}/status`, { status }),
-    delete: (id) => api.delete(`/orders/${id}`),
-};
+// GET /users
+export const getUsers = () => http.get('/users')
 
-// ==================== ORDER ITEMS ====================
-export const orderItemAPI = {
-    getByOrderId: (orderId) => api.get(`/orders/${orderId}/items`),
-    create: (orderItem) => api.post('/order-items', orderItem),
-    update: (id, orderItem) => api.put(`/order-items/${id}`, orderItem),
-    delete: (id) => api.delete(`/order-items/${id}`),
-};
+// GET /users?name=xxx
+export const getUserByName = (name) => http.get('/users', { params: { name } })
 
-// ==================== TABLES ====================
-export const tableAPI = {
-    getAll: () => api.get('/tables'),
-    getById: (id) => api.get(`/tables/${id}`),
-    create: (table) => api.post('/tables', table),
-    update: (id, table) => api.put(`/tables/${id}`, table),
-    updateStatus: (id, status) => api.put(`/tables/${id}/status`, { status }),
-    delete: (id) => api.delete(`/tables/${id}`),
-};
+// GET /users/{id}
+export const getUserById = (id) => http.get(`/users/${id}`)
 
-// ==================== PROMOTIONS ====================
-export const promotionAPI = {
-    getAll: () => api.get('/promotions'),
-    getActive: () => api.get('/promotions/active'),
-    getById: (id) => api.get(`/promotions/${id}`),
-    create: (promotion) => api.post('/promotions', promotion),
-    update: (id, promotion) => api.put(`/promotions/${id}`, promotion),
-    delete: (id) => api.delete(`/promotions/${id}`),
-};
+// PUT /users/{id}
+export const updateUser = (id, body) => http.put(`/users/${id}`, body)
 
-// ==================== BILLS ====================
-export const billAPI = {
-    getAll: () => api.get('/bills'),
-    getById: (id) => api.get(`/bills/${id}`),
-    create: (bill) => api.post('/bills', bill),
-    updateStatus: (id, status) => api.put(`/bills/${id}/status`, { status }),
-};
+// DELETE /users/{id}
+export const deleteUser = (id) => http.delete(`/users/${id}`)
 
-// ==================== USERS ====================
-export const userAPI = {
-    getAll: () => api.get('/users'),
-    getById: (id) => api.get(`/users/${id}`),
-    create: (user) => api.post('/users/create', user),
-    update: (id, user) => api.put(`/users/${id}`, user),
-    delete: (id) => api.delete(`/users/${id}`),
-};
+// POST /users/admin
+export const createAdmin = (body) => http.post('/users/admin', body)
 
-export default api;
+// POST /users/staff
+export const createStaff = (body) => http.post('/users/staff', body)
+
+// GET /users/admins
+export const getAdmins = () => http.get('/users/admins')
+
+// GET /users/staffs
+export const getStaffs = () => http.get('/users/staffs')
+
+// POST /roles
+export const createRole = (body) => http.post('/roles', body)
+
+// GET /roles
+export const getRoles = () => http.get('/roles')
+
+// ─── PRODUCT SERVICE — port 8810 ─────────────────────────────────
+// GET /products  → List<Product> { id, productName, price, discription, category, availability }
+export const getProducts = () => http.get('/products')
+
+// GET /products?category=xxx
+export const getProductsByCategory = (category) =>
+    http.get('/products', { params: { category } })
+
+// GET /products?name=xxx
+export const getProductsByName = (name) =>
+    http.get('/products', { params: { name } })
+
+// GET /products/{id}
+export const getProductById = (id) => http.get(`/products/${id}`)
+
+// POST /admin/products → { productName, price, discription, category, availability }
+export const createProduct = (body) => http.post('/admin/products', body)
+
+// PUT /admin/products/{id}
+export const updateProduct = (id, body) => http.put(`/admin/products/${id}`, body)
+
+// DELETE /admin/products/{id}
+export const deleteProduct = (id) => http.delete(`/admin/products/${id}`)
+
+// ─── CART SERVICE — port 8813, Redis ─────────────────────────────
+// GET /cart  Header: Cookie: <cartId>
+export const getCart = (cartId) =>
+    http.get('/cart', { headers: { Cookie: cartId } })
+
+// POST /cart?productId=&quantity=  Header: Cookie: <cartId>
+export const addToCart = (cartId, productId, quantity) =>
+    http.post('/cart', null, {
+        params: { productId, quantity },
+        headers: { Cookie: cartId },
+    })
+
+// DELETE /cart?productId=  Header: Cookie: <cartId>
+export const removeFromCart = (cartId, productId) =>
+    http.delete('/cart', {
+        params: { productId },
+        headers: { Cookie: cartId },
+    })
+
+// ─── ORDER SERVICE — port 8813 ────────────────────────────────────
+// GET /order
+export const getOrders = () => http.get('/order')
+
+// GET /order/{id}
+export const getOrderById = (id) => http.get(`/order/${id}`)
+
+// GET /order/user/{userId}
+export const getOrdersByUser = (userId) => http.get(`/order/user/${userId}`)
+
+// POST /order/{userId}  Header: Cookie: <cartId>
+export const placeOrder = (userId, cartId) =>
+    http.post(`/order/${userId}`, null, { headers: { Cookie: cartId } })
+
+// PUT /order/{id}/status  body: { status }
+export const updateOrderStatus = (id, status) =>
+    http.put(`/order/${id}/status`, { status })
+
+// DELETE /order/{id}
+export const deleteOrder = (id) => http.delete(`/order/${id}`)
+
+// ─── PAYMENT SERVICE — port 8819 ─────────────────────────────────
+// GET /api/payments
+export const getPayments = () => http.get('/api/payments')
+
+// GET /api/payments/{id}
+export const getPaymentById = (id) => http.get(`/api/payments/${id}`)
+
+// GET /api/payments/order/{orderId}
+export const getPaymentsByOrder = (orderId) =>
+    http.get(`/api/payments/order/${orderId}`)
+
+// GET /api/payments/user/{userId}
+export const getPaymentsByUser = (userId) =>
+    http.get(`/api/payments/user/${userId}`)
+
+// POST /api/payments  body: { orderId, userId, amount, method }
+export const createPayment = (body) => http.post('/api/payments', body)
+
+// POST /api/payments/{id}/process
+export const processPayment = (id) => http.post(`/api/payments/${id}/process`)
+
+// POST /api/payments/refund  body: { orderId, reason }
+export const refundPayment = (body) => http.post('/api/payments/refund', body)
+
+// PUT /api/payments/{id}/status  body: { status }
+export const updatePaymentStatus = (id, body) =>
+    http.put(`/api/payments/${id}/status`, body)
+
+export default http

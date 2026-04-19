@@ -1,13 +1,15 @@
-import React, { useState } from 'react';
-import { Save, Globe, Bell, Shield, Palette, Database, Mail, Package } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { Save, Globe, Bell, Palette, Package, Loader2, AlertCircle } from "lucide-react";
+import { useAppContext } from "../../contexts/AppContext";
 
 function AdminSettings() {
+    const { axiosInstance } = useAppContext();
     const [settings, setSettings] = useState({
         // Thông tin chung
-        storeName: 'Coffee Blend',
-        storeEmail: 'contact@coffeeblend.vn',
-        storePhone: '0328778198',
-        storeAddress: '2/60, Thủ Đức, TP.HCM',
+        storeName: "Coffee Blend",
+        storeEmail: "contact@coffeeblend.vn",
+        storePhone: "0328778198",
+        storeAddress: "2/60, Thủ Đức, TP.HCM",
 
         // Cài đặt thông báo
         emailNotifications: true,
@@ -15,276 +17,467 @@ function AdminSettings() {
         promotionNotifications: false,
 
         // Cài đặt cửa hàng
-        currency: 'VND',
-        timezone: 'Asia/Ho_Chi_Minh',
-        language: 'vi',
+        currency: "VND",
+        timezone: "Asia/Ho_Chi_Minh",
+        language: "vi",
         taxRate: 10,
 
         // Giao diện
-        themeColor: '#D97706',
-        darkMode: true,
+        themeColor: "#D97706",
+        darkMode: false,
 
         // Vận chuyển
         freeShippingThreshold: 200000,
-        shippingFee: 30000
+        shippingFee: 30000,
     });
 
     const [saved, setSaved] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [error, setError] = useState(null);
 
-    const handleSave = () => {
-        // Lưu cài đặt (gọi API)
-        console.log('Lưu cài đặt:', settings);
-        setSaved(true);
-        setTimeout(() => setSaved(false), 3000);
+    const getToken = () => localStorage.getItem("admin_token") || localStorage.getItem("staff_token");
+
+    // Fetch settings from API
+    const fetchSettings = async () => {
+        setIsLoading(true);
+        setError(null);
+
+        try {
+            const token = getToken();
+            if (!token) {
+                throw new Error("Không tìm thấy token xác thực");
+            }
+
+            const response = await axiosInstance.get('/settings', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            });
+
+            const data = response.data?.data || response.data;
+
+            // If settings exist in database, use them
+            if (data) {
+                // Convert array of settings to object
+                let settingsObj = {};
+                if (Array.isArray(data)) {
+                    data.forEach(item => {
+                        settingsObj[item.key] = item.value;
+                    });
+                } else {
+                    settingsObj = data;
+                }
+
+                // Parse JSON strings and convert types
+                const parsedSettings = {};
+                Object.keys(settingsObj).forEach(key => {
+                    try {
+                        parsedSettings[key] = JSON.parse(settingsObj[key]);
+                    } catch {
+                        parsedSettings[key] = settingsObj[key];
+                    }
+                });
+
+                setSettings(prev => ({ ...prev, ...parsedSettings }));
+
+                // Apply to localStorage and DOM
+                if (parsedSettings.themeColor) {
+                    localStorage.setItem("themeColor", parsedSettings.themeColor);
+                }
+                if (parsedSettings.darkMode !== undefined) {
+                    localStorage.setItem("darkMode", parsedSettings.darkMode);
+                }
+            }
+        } catch (err) {
+            console.error("❌ Lỗi tải cài đặt:", err);
+
+            // If API not available, load from localStorage
+            const localThemeColor = localStorage.getItem("themeColor");
+            const localDarkMode = localStorage.getItem("darkMode");
+
+            if (localThemeColor || localDarkMode) {
+                setSettings(prev => ({
+                    ...prev,
+                    themeColor: localThemeColor || prev.themeColor,
+                    darkMode: localDarkMode === "true"
+                }));
+            }
+
+            // Only show error if it's not a 404 (settings might not exist yet)
+            if (err.response?.status !== 404) {
+                setError("Không thể tải cài đặt. Sử dụng cài đặt mặc định.");
+            }
+        } finally {
+            setIsLoading(false);
+        }
     };
 
+    // Save settings to API
+    const handleSave = async () => {
+        setIsSaving(true);
+        setError(null);
+
+        try {
+            const token = getToken();
+            if (!token) {
+                throw new Error("Không tìm thấy token xác thực");
+            }
+
+            // Convert settings object to array format for API
+            const settingsArray = Object.keys(settings).map(key => ({
+                key: key,
+                value: typeof settings[key] === 'object'
+                    ? JSON.stringify(settings[key])
+                    : String(settings[key])
+            }));
+
+            // Try to update existing settings
+            await axiosInstance.put('/settings', settingsArray, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            }).catch(async (updateErr) => {
+                // If PUT fails (404), try POST to create
+                if (updateErr.response?.status === 404) {
+                    await axiosInstance.post('/settings', settingsArray, {
+                        headers: {
+                            'Authorization': `Bearer ${token}`,
+                            'Content-Type': 'application/json'
+                        }
+                    });
+                } else {
+                    throw updateErr;
+                }
+            });
+
+            // Save to localStorage as backup
+            localStorage.setItem("darkMode", settings.darkMode);
+            localStorage.setItem("themeColor", settings.themeColor);
+
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
+
+        } catch (err) {
+            console.error("❌ Lỗi lưu cài đặt:", err);
+
+            // Fallback: save to localStorage only
+            localStorage.setItem("darkMode", settings.darkMode);
+            localStorage.setItem("themeColor", settings.themeColor);
+
+            setError(
+                "Không thể lưu vào database. Đã lưu vào bộ nhớ local. " +
+                (err.response?.data?.message || err.message)
+            );
+
+            // Still show success for UX
+            setSaved(true);
+            setTimeout(() => setSaved(false), 3000);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // Load settings on mount
+    useEffect(() => {
+        fetchSettings();
+    }, []);
+
+    // ✅ Cập nhật giao diện toàn app khi darkMode hoặc themeColor thay đổi
+    useEffect(() => {
+        document.documentElement.classList.toggle("dark", settings.darkMode);
+        document.documentElement.style.setProperty("--theme-color", settings.themeColor);
+    }, [settings.darkMode, settings.themeColor]);
+
     const themeColors = [
-        { value: '#D97706', name: 'Cam' },
-        { value: '#DC2626', name: 'Đỏ' },
-        { value: '#3B82F6', name: 'Xanh Dương' },
-        { value: '#10B981', name: 'Xanh Lá' },
-        { value: '#8B5CF6', name: 'Tím' },
-        { value: '#EC4899', name: 'Hồng' }
+        { value: "#D97706", name: "Cam" },
+        { value: "#DC2626", name: "Đỏ" },
+        { value: "#3B82F6", name: "Xanh Dương" },
+        { value: "#10B981", name: "Xanh Lá" },
+        { value: "#8B5CF6", name: "Tím" },
+        { value: "#EC4899", name: "Hồng" },
     ];
 
+    if (isLoading) {
+        return (
+            <div className="p-6 flex items-center justify-center min-h-[400px]">
+                <div className="text-center">
+                    <Loader2 className="w-12 h-12 text-amber-500 animate-spin mx-auto mb-4" />
+                    <p className="text-gray-400">Đang tải cài đặt...</p>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="p-6">
+        <div className="p-6 bg-white text-black dark:bg-gray-900 dark:text-white min-h-screen transition-colors duration-500">
+            {/* Header */}
             <div className="mb-8">
-                <h1 className="text-3xl font-bold text-white mb-2">Cài Đặt Hệ Thống</h1>
-                <p className="text-gray-400">Quản lý cấu hình và tùy chỉnh hệ thống</p>
+                <h1
+                    className="text-3xl font-bold mb-2 transition-colors"
+                    style={{ color: settings.themeColor }}
+                >
+                    Cài Đặt Hệ Thống
+                </h1>
+                <p className="text-gray-500 dark:text-gray-400">
+                    Quản lý cấu hình và tùy chỉnh hệ thống
+                </p>
             </div>
 
+            {/* Thông báo lưu thành công */}
             {saved && (
-                <div className="mb-6 bg-green-500/20 border border-green-500 text-green-400 px-6 py-4 rounded-lg flex items-center gap-3">
+                <div className="mb-6 bg-green-500/20 border border-green-500 text-green-400 px-6 py-4 rounded-lg flex items-center gap-3 animate-fadeIn">
                     <Save className="w-5 h-5" />
-                    <span>Cài đặt đã được lưu thành công!</span>
+                    <span>✅ Cài đặt đã được lưu thành công!</span>
                 </div>
             )}
 
+            {/* Error message */}
+            {error && (
+                <div className="mb-6 bg-yellow-500/20 border border-yellow-500 text-yellow-400 px-6 py-4 rounded-lg flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                    <div>
+                        <p className="font-semibold mb-1">Cảnh báo</p>
+                        <p className="text-sm">{error}</p>
+                    </div>
+                </div>
+            )}
+
+            {/* Các khối nội dung */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Thông Tin Chung */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-amber-500/20 p-3 rounded-lg">
-                            <Globe className="w-6 h-6 text-amber-500" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Thông Tin Chung</h2>
-                            <p className="text-gray-400 text-sm">Thông tin cơ bản về cửa hàng</p>
-                        </div>
-                    </div>
+                {/* 🏪 Thông Tin Chung */}
+                <Section
+                    icon={<Globe className="w-6 h-6 text-amber-500" />}
+                    title="Thông Tin Chung"
+                    desc="Thông tin cơ bản về cửa hàng"
+                >
+                    <Input
+                        label="Tên Cửa Hàng"
+                        value={settings.storeName}
+                        onChange={(v) => setSettings({ ...settings, storeName: v })}
+                    />
+                    <Input
+                        label="Email"
+                        type="email"
+                        value={settings.storeEmail}
+                        onChange={(v) => setSettings({ ...settings, storeEmail: v })}
+                    />
+                    <Input
+                        label="Số Điện Thoại"
+                        type="tel"
+                        value={settings.storePhone}
+                        onChange={(v) => setSettings({ ...settings, storePhone: v })}
+                    />
+                    <Textarea
+                        label="Địa Chỉ"
+                        value={settings.storeAddress}
+                        onChange={(v) => setSettings({ ...settings, storeAddress: v })}
+                    />
+                </Section>
 
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Tên Cửa Hàng</label>
-                            <input
-                                type="text"
-                                value={settings.storeName}
-                                onChange={(e) => setSettings({ ...settings, storeName: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                            />
-                        </div>
+                {/* 🔔 Thông Báo */}
+                <Section
+                    icon={<Bell className="w-6 h-6 text-blue-500" />}
+                    title="Thông Báo"
+                    desc="Cài đặt thông báo hệ thống"
+                >
+                    {[
+                        { label: "Thông Báo Email", key: "emailNotifications" },
+                        { label: "Thông Báo Đơn Hàng", key: "orderNotifications" },
+                        { label: "Thông Báo Khuyến Mãi", key: "promotionNotifications" },
+                    ].map((item) => (
+                        <ToggleRow
+                            key={item.key}
+                            label={item.label}
+                            checked={settings[item.key]}
+                            onChange={() =>
+                                setSettings({ ...settings, [item.key]: !settings[item.key] })
+                            }
+                            color={settings.themeColor}
+                        />
+                    ))}
+                </Section>
 
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Email</label>
-                            <input
-                                type="email"
-                                value={settings.storeEmail}
-                                onChange={(e) => setSettings({ ...settings, storeEmail: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                            />
-                        </div>
+                {/* ⚙️ Cài Đặt Cửa Hàng */}
+                <Section
+                    icon={<Package className="w-6 h-6 text-green-500" />}
+                    title="Cài Đặt Cửa Hàng"
+                    desc="Ngôn ngữ, thuế và định dạng"
+                >
+                    <Select
+                        label="Ngôn Ngữ"
+                        value={settings.language}
+                        onChange={(v) => setSettings({ ...settings, language: v })}
+                        options={[
+                            { value: "vi", label: "Tiếng Việt" },
+                            { value: "en", label: "English" },
+                        ]}
+                    />
+                    <Input
+                        label="Múi Giờ"
+                        value={settings.timezone}
+                        onChange={(v) => setSettings({ ...settings, timezone: v })}
+                    />
+                    <Input
+                        label="Thuế (%)"
+                        type="number"
+                        value={settings.taxRate}
+                        onChange={(v) => setSettings({ ...settings, taxRate: parseInt(v) || 0 })}
+                    />
+                </Section>
 
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Số Điện Thoại</label>
-                            <input
-                                type="tel"
-                                value={settings.storePhone}
-                                onChange={(e) => setSettings({ ...settings, storePhone: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                            />
-                        </div>
-
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Địa Chỉ</label>
-                            <textarea
-                                value={settings.storeAddress}
-                                onChange={(e) => setSettings({ ...settings, storeAddress: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                                rows={2}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Thông Báo */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-blue-500/20 p-3 rounded-lg">
-                            <Bell className="w-6 h-6 text-blue-500" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Thông Báo</h2>
-                            <p className="text-gray-400 text-sm">Cài đặt thông báo hệ thống</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                            <div>
-                                <div className="text-white font-medium">Thông Báo Email</div>
-                                <div className="text-gray-400 text-sm">Nhận thông báo qua email</div>
-                            </div>
+                {/* 🎨 Giao Diện */}
+                <Section
+                    icon={<Palette className="w-6 h-6 text-purple-500" />}
+                    title="Giao Diện"
+                    desc="Tùy chỉnh màu sắc và chế độ giao diện"
+                >
+                    <label className="block mb-3 font-medium">Màu Chủ Đạo</label>
+                    <div className="flex gap-3 flex-wrap mb-5">
+                        {themeColors.map((color) => (
                             <button
-                                onClick={() => setSettings({ ...settings, emailNotifications: !settings.emailNotifications })}
-                                className={`relative w-14 h-7 rounded-full transition-colors ${settings.emailNotifications ? 'bg-amber-600' : 'bg-gray-600'
+                                key={color.value}
+                                onClick={() =>
+                                    setSettings({ ...settings, themeColor: color.value })
+                                }
+                                className={`w-10 h-10 rounded-lg border-2 transform transition-all duration-300 hover:scale-110 ${settings.themeColor === color.value
+                                    ? "border-white scale-110 shadow-lg"
+                                    : "border-transparent"
                                     }`}
-                            >
-                                <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${settings.emailNotifications ? 'translate-x-7' : ''
-                                    }`} />
-                            </button>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                            <div>
-                                <div className="text-white font-medium">Thông Báo Đơn Hàng</div>
-                                <div className="text-gray-400 text-sm">Thông báo khi có đơn hàng mới</div>
-                            </div>
-                            <button
-                                onClick={() => setSettings({ ...settings, orderNotifications: !settings.orderNotifications })}
-                                className={`relative w-14 h-7 rounded-full transition-colors ${settings.orderNotifications ? 'bg-amber-600' : 'bg-gray-600'
-                                    }`}
-                            >
-                                <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${settings.orderNotifications ? 'translate-x-7' : ''
-                                    }`} />
-                            </button>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                            <div>
-                                <div className="text-white font-medium">Thông Báo Khuyến Mãi</div>
-                                <div className="text-gray-400 text-sm">Thông báo về chương trình khuyến mãi</div>
-                            </div>
-                            <button
-                                onClick={() => setSettings({ ...settings, promotionNotifications: !settings.promotionNotifications })}
-                                className={`relative w-14 h-7 rounded-full transition-colors ${settings.promotionNotifications ? 'bg-amber-600' : 'bg-gray-600'
-                                    }`}
-                            >
-                                <span
-                                    className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${settings.promotionNotifications ? 'translate-x-7' : ''
-                                        }`}
-                                />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                {/* Cài Đặt Cửa Hàng */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-green-500/20 p-3 rounded-lg">
-                            <Package className="w-6 h-6 text-green-500" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Cài Đặt Cửa Hàng</h2>
-                            <p className="text-gray-400 text-sm">Ngôn ngữ, thuế và định dạng</p>
-                        </div>
-                    </div>
-
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Ngôn Ngữ</label>
-                            <select
-                                value={settings.language}
-                                onChange={(e) => setSettings({ ...settings, language: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                            >
-                                <option value="vi">Tiếng Việt</option>
-                                <option value="en">English</option>
-                            </select>
-                        </div>
-
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Múi Giờ</label>
-                            <input
-                                type="text"
-                                value={settings.timezone}
-                                onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
+                                style={{
+                                    backgroundColor: color.value,
+                                    boxShadow:
+                                        settings.themeColor === color.value
+                                            ? `0 0 10px ${color.value}aa`
+                                            : "none",
+                                }}
+                                title={color.name}
                             />
-                        </div>
-
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Thuế (%)</label>
-                            <input
-                                type="number"
-                                value={settings.taxRate}
-                                onChange={(e) => setSettings({ ...settings, taxRate: parseInt(e.target.value) })}
-                                className="w-full bg-gray-700 text-white px-4 py-3 rounded border border-gray-600 focus:border-amber-500 outline-none"
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* Giao Diện */}
-                <div className="bg-gray-800 rounded-lg border border-gray-700 p-6">
-                    <div className="flex items-center gap-3 mb-6">
-                        <div className="bg-purple-500/20 p-3 rounded-lg">
-                            <Palette className="w-6 h-6 text-purple-500" />
-                        </div>
-                        <div>
-                            <h2 className="text-xl font-bold text-white">Giao Diện</h2>
-                            <p className="text-gray-400 text-sm">Tùy chỉnh màu sắc và chế độ giao diện</p>
-                        </div>
+                        ))}
                     </div>
 
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-white mb-2 font-medium">Màu Chủ Đạo</label>
-                            <div className="flex gap-3">
-                                {themeColors.map((color) => (
-                                    <button
-                                        key={color.value}
-                                        onClick={() => setSettings({ ...settings, themeColor: color.value })}
-                                        className={`w-10 h-10 rounded-lg border-2 ${settings.themeColor === color.value ? 'border-white' : 'border-transparent'
-                                            }`}
-                                        style={{ backgroundColor: color.value }}
-                                        title={color.name}
-                                    />
-                                ))}
-                            </div>
-                        </div>
-
-                        <div className="flex items-center justify-between p-4 bg-gray-900 rounded-lg">
-                            <div>
-                                <div className="text-white font-medium">Chế Độ Tối</div>
-                                <div className="text-gray-400 text-sm">Bật/tắt dark mode</div>
-                            </div>
-                            <button
-                                onClick={() => setSettings({ ...settings, darkMode: !settings.darkMode })}
-                                className={`relative w-14 h-7 rounded-full transition-colors ${settings.darkMode ? 'bg-amber-600' : 'bg-gray-600'
-                                    }`}
-                            >
-                                <span className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${settings.darkMode ? 'translate-x-7' : ''
-                                    }`} />
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <ToggleRow
+                        label="Chế Độ Tối"
+                        checked={settings.darkMode}
+                        onChange={() =>
+                            setSettings({ ...settings, darkMode: !settings.darkMode })
+                        }
+                        color={settings.themeColor}
+                    />
+                </Section>
             </div>
 
-            {/* Nút lưu */}
-            <div className="mt-8 flex justify-end">
+            {/* 🧾 Nút Lưu */}
+            <div className="mt-8 flex justify-end gap-3">
+                <button
+                    onClick={fetchSettings}
+                    disabled={isLoading || isSaving}
+                    className="bg-gray-600 hover:bg-gray-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    {isLoading ? (
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                        <AlertCircle className="w-5 h-5" />
+                    )}
+                    Tải lại
+                </button>
+
                 <button
                     onClick={handleSave}
-                    className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition"
+                    disabled={isSaving}
+                    className="text-white px-6 py-3 rounded-lg font-semibold flex items-center gap-2 transition-transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ backgroundColor: settings.themeColor }}
                 >
-                    <Save className="w-5 h-5" />
-                    Lưu Cài Đặt
+                    {isSaving ? (
+                        <>
+                            <Loader2 className="w-5 h-5 animate-spin" />
+                            Đang lưu...
+                        </>
+                    ) : (
+                        <>
+                            <Save className="w-5 h-5" />
+                            Lưu Cài Đặt
+                        </>
+                    )}
                 </button>
             </div>
         </div>
     );
 }
+
+/* === COMPONENTS PHỤ === */
+const Section = ({ icon, title, desc, children }) => (
+    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg border border-gray-300 dark:border-gray-700 p-6 transition-all">
+        <div className="flex items-center gap-3 mb-6">
+            <div className="bg-[var(--theme-color)]/20 p-3 rounded-lg">{icon}</div>
+            <div>
+                <h2 className="text-xl font-bold">{title}</h2>
+                <p className="text-gray-500 dark:text-gray-400 text-sm">{desc}</p>
+            </div>
+        </div>
+        <div className="space-y-4">{children}</div>
+    </div>
+);
+
+const Input = ({ label, type = "text", value, onChange }) => (
+    <div>
+        <label className="block mb-2 font-medium">{label}</label>
+        <input
+            type={type}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-gray-200 dark:bg-gray-700 text-black dark:text-white px-4 py-3 rounded border border-gray-300 dark:border-gray-600 focus:border-[var(--theme-color)] outline-none transition"
+        />
+    </div>
+);
+
+const Textarea = ({ label, value, onChange }) => (
+    <div>
+        <label className="block mb-2 font-medium">{label}</label>
+        <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={2}
+            className="w-full bg-gray-200 dark:bg-gray-700 text-black dark:text-white px-4 py-3 rounded border border-gray-300 dark:border-gray-600 focus:border-[var(--theme-color)] outline-none transition"
+        />
+    </div>
+);
+
+const Select = ({ label, value, onChange, options }) => (
+    <div>
+        <label className="block mb-2 font-medium">{label}</label>
+        <select
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            className="w-full bg-gray-200 dark:bg-gray-700 text-black dark:text-white px-4 py-3 rounded border border-gray-300 dark:border-gray-600 focus:border-[var(--theme-color)] outline-none transition"
+        >
+            {options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                </option>
+            ))}
+        </select>
+    </div>
+);
+
+const ToggleRow = ({ label, checked, onChange }) => (
+    <div className="flex items-center justify-between p-4 bg-gray-200 dark:bg-gray-900 rounded-lg transition">
+        <div>
+            <div className="font-medium">{label}</div>
+        </div>
+        <button
+            onClick={onChange}
+            className={`relative w-14 h-7 rounded-full transition-colors duration-300 ${checked ? "bg-[var(--theme-color)]" : "bg-gray-500"
+                }`}
+        >
+            <span
+                className={`absolute top-1 left-1 w-5 h-5 bg-white rounded-full transition-transform ${checked ? "translate-x-7" : ""
+                    }`}
+            />
+        </button>
+    </div>
+);
 
 export default AdminSettings;

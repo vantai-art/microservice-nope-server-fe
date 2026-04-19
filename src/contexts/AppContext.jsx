@@ -1,171 +1,205 @@
-// contexts/AppContext.jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
+// src/contexts/AppContext.jsx
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import axios from 'axios'
 
-const AppContext = createContext();
+const BASE_URL = 'http://localhost:8080'
 
-export const useAppContext = () => {
-    const context = useContext(AppContext);
-    if (!context) {
-        throw new Error('useAppContext phải được sử dụng trong AppProvider');
-    }
-    return context;
-};
+// ─── Axios instance chung ───────────────────────────────────────
+const axiosInstance = axios.create({
+    baseURL: BASE_URL,
+    withCredentials: true,
+    timeout: 10000,
+})
+
+// ─── Local-storage helpers ──────────────────────────────────────
+const getStoredUser = () => {
+    try {
+        const raw = localStorage.getItem('user')
+        return raw ? JSON.parse(raw) : null
+    } catch { return null }
+}
+
+// ─── Context ────────────────────────────────────────────────────
+const AppCtx = createContext(null)
 
 export function AppProvider({ children }) {
-    // Products State
-    const [products, setProducts] = useState([
-        { id: 1, name: 'Cà Phê Cappuccino', description: 'Hương vị đậm đà với lớp bọt sữa mịn màng', price: 45000, category: 'Cà Phê', image: 'https://images.unsplash.com/photo-1572442388796-11668a67e53d?w=400&h=400&fit=crop', stock: 50 },
-        { id: 2, name: 'Cà Phê Latte', description: 'Sự kết hợp hoàn hảo giữa cà phê và sữa tươi', price: 42000, category: 'Cà Phê', image: 'https://images.unsplash.com/photo-1534778101976-62847782c213?w=400&h=400&fit=crop', stock: 45 },
-        { id: 3, name: 'Cà Phê Espresso', description: 'Đậm đà, mạnh mẽ cho người sành điệu', price: 38000, category: 'Cà Phê', image: 'https://images.unsplash.com/photo-1461023058943-07fcbe16d735?w=400&h=400&fit=crop', stock: 60 },
-        { id: 4, name: 'Cà Phê Mocha', description: 'Vị chocolate ngọt ngào hoà quyện cà phê', price: 48000, category: 'Cà Phê', image: 'https://images.unsplash.com/photo-1517487881594-2787fef5ebf7?w=400&h=400&fit=crop', stock: 40 },
-        { id: 5, name: 'Bít Tết Bò', description: 'Bít tết bò Úc nướng chín vừa, kèm rau củ', price: 189000, category: 'Món Chính', image: 'https://images.unsplash.com/photo-1600891964092-4316c288032e?w=400&h=400&fit=crop', stock: 25 },
-        { id: 6, name: 'Nước Cam Tươi', description: 'Nước cam vắt tươi 100% không đường', price: 35000, category: 'Đồ Uống', image: 'https://images.unsplash.com/photo-1600271886742-f049cd451bba?w=400&h=400&fit=crop', stock: 80 },
-        { id: 7, name: 'Bánh Chocolate', description: 'Bánh chocolate nhiều lớp thơm ngon', price: 55000, category: 'Tráng Miệng', image: 'https://images.unsplash.com/photo-1578985545062-69928b1d9587?w=400&h=400&fit=crop', stock: 30 },
-    ]);
+    // ── Auth ──────────────────────────────────────────────────────
+    const [user, setUserState] = useState(() => getStoredUser())
 
-    const [categories] = useState(['Cà Phê', 'Món Chính', 'Đồ Uống', 'Tráng Miệng']);
+    const login = useCallback((userData) => {
+        setUserState(userData)
+        localStorage.setItem('user', JSON.stringify(userData))
+    }, [])
 
-    // Cart State
-    const [cart, setCart] = useState([]);
+    const logout = useCallback(() => {
+        localStorage.removeItem('user')
+        localStorage.removeItem('cartId')
+        setUserState(null)
+        setCart([])
+        setCartCount(0)
+    }, [])
 
-    // Admin Auth State - Lưu vào localStorage
-    const [isAdminAuthenticated, setIsAdminAuthenticated] = useState(() => {
-        const saved = localStorage.getItem('isAdminAuth');
-        return saved === 'true';
-    });
+    const isAdmin = user?.role === 'ROLE_ADMIN'
+    const isStaff = user?.role === 'ROLE_STAFF'
+    const isUser = user?.role === 'ROLE_USER'
 
-    // Lưu admin auth vào localStorage khi thay đổi
-    useEffect(() => {
-        localStorage.setItem('isAdminAuth', isAdminAuthenticated);
-    }, [isAdminAuthenticated]);
+    // ── Products ──────────────────────────────────────────────────
+    const [products, setProducts] = useState([])
+    const [loading, setLoading] = useState(false)
+    const [error, setError] = useState(null)
 
-    // Blog State
-    const [blogPosts] = useState([
-        {
-            id: 1,
-            title: 'Bí quyết pha chế cà phê ngon',
-            excerpt: 'Khám phá những bí mật đằng sau tách cà phê hoàn hảo...',
-            image: 'https://images.unsplash.com/photo-1495474472287-4d71bcdd2085?w=600&h=400&fit=crop',
-            author: 'Admin',
-            date: '15/09/2024',
-            views: 245
-        },
-        {
-            id: 2,
-            title: 'Top 5 món tráng miệng tại Coffee Blend',
-            excerpt: 'Những món tráng miệng không thể bỏ qua khi đến quán...',
-            image: 'https://images.unsplash.com/photo-1488477181946-6428a0291777?w=600&h=400&fit=crop',
-            author: 'Admin',
-            date: '20/09/2024',
-            views: 189
+    const fetchProducts = useCallback(async () => {
+        setLoading(true)
+        setError(null)
+        try {
+            const res = await axiosInstance.get('/products')
+            const list = Array.isArray(res.data) ? res.data : []
+            const normalised = list.map(p => ({
+                ...p,
+                name: p.productName ?? p.name ?? '',
+                description: p.discription ?? p.description ?? '',
+                category: typeof p.category === 'string'
+                    ? { name: p.category }
+                    : (p.category ?? { name: 'Khác' }),
+                imageUrl: p.imageUrl ?? p.image ?? '',
+                price: Number(p.price ?? 0),
+                stockQuantity: p.availability ?? p.stockQuantity ?? 0,
+            }))
+            setProducts(normalised)
+        } catch (err) {
+            console.error('Lỗi tải sản phẩm:', err)
+            setError('Không thể tải danh sách sản phẩm')
+        } finally {
+            setLoading(false)
         }
-    ]);
+    }, [])
 
-    // Cart Functions
-    const addToCart = (product) => {
+    useEffect(() => { fetchProducts() }, [fetchProducts])
+
+    // ── Tables ────────────────────────────────────────────────────
+    const [tables, setTables] = useState([])
+
+    // ── Cart ──────────────────────────────────────────────────────
+    const [cart, setCart] = useState([])
+    const [cartCount, setCartCount] = useState(0)
+
+    const addToCart = useCallback((product, qty = 1) => {
         setCart(prev => {
-            const existing = prev.find(item => item.id === product.id);
+            const existing = prev.find(i => i.id === product.id)
             if (existing) {
-                return prev.map(item =>
-                    item.id === product.id
-                        ? { ...item, quantity: item.quantity + 1 }
-                        : item
-                );
+                return prev.map(i =>
+                    i.id === product.id ? { ...i, quantity: i.quantity + qty } : i
+                )
             }
-            return [...prev, { ...product, quantity: 1 }];
-        });
-    };
+            return [...prev, { ...product, quantity: qty }]
+        })
+    }, [])
 
-    const removeFromCart = (productId) => {
-        setCart(prev => prev.filter(item => item.id !== productId));
-    };
+    const removeFromCart = useCallback((productId) => {
+        setCart(prev => prev.filter(i => i.id !== productId))
+    }, [])
 
-    const updateQuantity = (productId, quantity) => {
-        if (quantity <= 0) {
-            removeFromCart(productId);
-            return;
+    const updateQuantity = useCallback((productId, qty) => {
+        if (qty <= 0) {
+            setCart(prev => prev.filter(i => i.id !== productId))
+        } else {
+            setCart(prev => prev.map(i =>
+                i.id === productId ? { ...i, quantity: qty } : i
+            ))
         }
-        setCart(prev =>
-            prev.map(item =>
-                item.id === productId ? { ...item, quantity } : item
-            )
-        );
-    };
+    }, [])
 
-    const clearCart = () => {
-        setCart([]);
-    };
+    const clearCart = useCallback(() => setCart([]), [])
 
-    // Cart Calculations
-    const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
-    const cartTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const cartTotal = cart.reduce((sum, i) => sum + i.price * i.quantity, 0)
 
-    // Product Functions
-    const addProduct = (product) => {
-        const newProduct = { ...product, id: Date.now() };
-        setProducts(prev => [...prev, newProduct]);
-    };
+    useEffect(() => {
+        setCartCount(cart.reduce((sum, i) => sum + i.quantity, 0))
+    }, [cart])
 
-    const updateProduct = (id, updatedProduct) => {
-        setProducts(prev =>
-            prev.map(p => p.id === id ? { ...p, ...updatedProduct } : p)
-        );
-    };
+    // ── Toast ──────────────────────────────────────────────────────
+    const [toast, setToast] = useState(null)
+    const showToast = useCallback((msg, type = 'success') => {
+        setToast({ msg, type, id: Date.now() })
+        setTimeout(() => setToast(null), 3000)
+    }, [])
 
-    const deleteProduct = (id) => {
-        setProducts(prev => prev.filter(p => p.id !== id));
-    };
+    // ── Create order ───────────────────────────────────────────────
+    // FIX: Browser chặn set header "Cookie" thủ công (Refused to set unsafe header)
+    // Giải pháp: gọi POST /order/{userId}/direct với cart items trong body
+    const createOrder = useCallback(async () => {
+        if (!user) throw new Error('Chưa đăng nhập')
+        if (cart.length === 0) throw new Error('Giỏ hàng trống')
 
-    // Order Functions
-    const createOrder = (customerInfo) => {
-        const newOrder = {
-            id: `DH${Date.now()}`,
-            items: [...cart],
-            total: cartTotal,
-            status: 'Chờ xử lý',
-            date: new Date().toLocaleDateString('vi-VN'),
-            time: new Date().toLocaleTimeString('vi-VN'),
-            ...customerInfo
-        };
+        // Build payload: mỗi item gửi đủ productId, productName, price, quantity
+        const cartItems = cart.map(item => ({
+            productId: item.id,
+            productName: item.name ?? item.productName ?? '',
+            price: item.price,
+            quantity: item.quantity,
+        }))
 
-        console.log('Đơn hàng mới:', newOrder);
-        // Ở đây bạn có thể gọi API để lưu đơn hàng
+        // Gọi endpoint mới /direct — không cần Cookie header
+        const res = await axiosInstance.post(
+            `/order/${user.id}/direct`,
+            cartItems
+        )
 
-        return newOrder;
-    };
+        clearCart()
+        showToast('Đặt hàng thành công!', 'success')
+        return res.data
+    }, [user, cart, clearCart, showToast])
 
+    // ─────────────────────────────────────────────────────────────
     const value = {
-        // Products
-        products,
-        setProducts,
-        addProduct,
-        updateProduct,
-        deleteProduct,
-        categories,
-
-        // Cart
-        cart,
-        cartCount,
-        cartTotal,
-        addToCart,
-        removeFromCart,
-        updateQuantity,
-        clearCart,
-
-        // Order
+        // auth
+        user, login, logout, isAdmin, isStaff, isUser,
+        // products
+        products, loading, error, fetchProducts,
+        // tables
+        tables, setTables,
+        // cart
+        cart, cartCount, setCartCount, cartTotal,
+        addToCart, removeFromCart, updateQuantity, clearCart,
         createOrder,
-
-        // Admin
-        isAdminAuthenticated,
-        setIsAdminAuthenticated,
-
-        // Blog
-        blogPosts
-    };
+        // ui
+        showToast,
+        // axios
+        axiosInstance,
+    }
 
     return (
-        <AppContext.Provider value={value}>
+        <AppCtx.Provider value={value}>
             {children}
-        </AppContext.Provider>
-    );
+            {toast && <Toast toast={toast} />}
+        </AppCtx.Provider>
+    )
+}
+
+// ── Hooks ─────────────────────────────────────────────────────────
+export const useApp = () => useContext(AppCtx)
+export const useAppContext = () => useContext(AppCtx)
+
+// ── Toast component ───────────────────────────────────────────────
+function Toast({ toast }) {
+    const colors = {
+        success: '#3d8b5e',
+        error: '#c0392b',
+        info: '#2980b9',
+        warning: '#d4a853',
+    }
+    return (
+        <div style={{
+            position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+            background: '#1a1a1a', border: `1px solid ${colors[toast.type] || colors.success}`,
+            borderLeft: `4px solid ${colors[toast.type] || colors.success}`,
+            borderRadius: 8, padding: '12px 20px', color: '#f0ede6',
+            fontFamily: 'DM Sans, sans-serif', fontSize: 14,
+            boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            animation: 'slideIn 0.2s ease',
+        }}>
+            {toast.msg}
+            <style>{`@keyframes slideIn { from { transform: translateX(40px); opacity:0 } to { transform: translateX(0); opacity:1 } }`}</style>
+        </div>
+    )
 }

@@ -1,160 +1,173 @@
-// App.jsx
-import React from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { useAppContext } from './contexts/AppContext';
+// src/App.js
+import React from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AppProvider, useApp } from './contexts/AppContext'
 
-// Import Components
-import Header from './components/Header';
-import StaffPage from './pages/staff/StaffPage';
+// ── Components ──────────────────────────────────────────────────
+import Header from './components/Header'
 
-// Import User Pages
-import HomePage from './pages/HomePage';
-import MenuPage from './pages/MenuPage';
-import ServicesPage from './pages/ServicesPage';
-import BlogPage from './pages/BlogPage';
-import AboutPage from './pages/AboutPage';
-import ShopPage from './pages/ShopPage';
-import ContactPage from './pages/ContactPage';
+// ── Pages ───────────────────────────────────────────────────────
+import HomePage from './pages/HomePage'
+import MenuPage from './pages/MenuPage'
+import ShopPage from './pages/ShopPage'
+import UserAuthPage from './pages/UserAuthPage'
+import CheckoutPage from './pages/CheckoutPage'
+import UserOrdersPage from './pages/UserOrdersPage'
 
-// Import Admin Pages
-import AdminLogin from './pages/admin/AdminLogin';
-import AdminLayout from './pages/admin/AdminLayout';
-import AdminDashboard from './pages/admin/AdminDashboard';
-import AdminProducts from './pages/admin/AdminProducts';
-import AdminCategories from './pages/admin/AdminCategories';
-import AdminOrders from './pages/admin/AdminOrders';
-import AdminUsers from './pages/admin/AdminUsers';
-import AdminBlog from './pages/admin/AdminBlog';
-import AdminSettings from './pages/admin/AdminSettings';
+// ── Admin ────────────────────────────────────────────────────────
+import AdminLogin from './pages/admin/AdminLogin'
+import AdminLayoutWrapper from './pages/admin/AdminLayoutWrapper'
 
-// Protected Route Component
-function ProtectedRoute({ children }) {
-  const { isAdminAuthenticated } = useAppContext();
-  return isAdminAuthenticated ? children : <Navigate to="/admin/login" />;
+// ── Staff ────────────────────────────────────────────────────────
+import StaffLoginPage from './pages/staff/StaffLoginPage'
+import StaffPage from './pages/staff/StaffPage'
+
+// ─── Protected Route cho user thường ────────────────────────────
+function ProtectedUserRoute({ children }) {
+  const { user } = useApp()
+  if (!user) return <Navigate to="/auth" replace />
+  return children
 }
 
-// Admin Routes Wrapper
-function AdminRoutes() {
-  const { setIsAdminAuthenticated } = useAppContext();
-  const [currentAdminPage, setCurrentAdminPage] = React.useState('dashboard');
-
-  const handleLogout = () => {
-    setIsAdminAuthenticated(false);
-    localStorage.removeItem('isAdminAuth');
-  };
-
-  const renderAdminPage = () => {
-    switch (currentAdminPage) {
-      case 'dashboard': return <AdminDashboard />;
-      case 'products': return <AdminProducts />;
-      case 'categories': return <AdminCategories />;
-      case 'orders': return <AdminOrders />;
-      case 'users': return <AdminUsers />;
-      case 'blog': return <AdminBlog />;
-      case 'settings': return <AdminSettings />;
-      default: return <AdminDashboard />;
-    }
-  };
-
-  return (
-    <AdminLayout
-      currentPage={currentAdminPage}
-      setCurrentPage={setCurrentAdminPage}
-      onLogout={handleLogout}
-    >
-      {renderAdminPage()}
-    </AdminLayout>
-  );
+// ─── Protected Route cho admin ──────────────────────────────────
+function ProtectedAdminRoute({ children }) {
+  const { user } = useApp()
+  if (!user) return <Navigate to="/admin/login" replace />
+  if (user.role !== 'ROLE_ADMIN') return <Navigate to="/admin/login" replace />
+  return children
 }
 
-function App() {
-  const { isAdminAuthenticated } = useAppContext();
+// ─── Protected Route cho staff ──────────────────────────────────
+function ProtectedStaffRoute({ children }) {
+  const { user } = useApp()
+  if (!user) return <Navigate to="/staff/login" replace />
+  if (user.role !== 'ROLE_STAFF' && user.role !== 'ROLE_ADMIN') return <Navigate to="/staff/login" replace />
+  return children
+}
 
+// ─── Guard cho /auth: nếu đã đăng nhập thì redirect đúng nơi ────
+function UserAuthGuard({ children }) {
+  const { user } = useApp()
+  if (!user) return children
+  if (user.role === 'ROLE_ADMIN') return <Navigate to="/admin" replace />
+  if (user.role === 'ROLE_STAFF') return <Navigate to="/staff" replace />
+  return <Navigate to="/" replace />
+}
+
+// ─── Guard cho /admin/login: chỉ redirect nếu đã là ADMIN ───────
+// (ROLE_USER vẫn được vào trang login admin để đăng nhập bằng acc khác)
+function AdminLoginGuard({ children }) {
+  const { user } = useApp()
+  if (user && user.role === 'ROLE_ADMIN') return <Navigate to="/admin" replace />
+  return children
+}
+
+// ─── Guard cho /staff/login: chỉ redirect nếu đã là STAFF/ADMIN ─
+function StaffLoginGuard({ children }) {
+  const { user } = useApp()
+  if (user && (user.role === 'ROLE_STAFF' || user.role === 'ROLE_ADMIN')) {
+    return <Navigate to="/staff" replace />
+  }
+  return children
+}
+
+// ─── Routes ─────────────────────────────────────────────────────
+function AppRoutes() {
   return (
-    <div className="App">
+    <>
+      {/* Header chỉ hiển thị trên trang user, ẩn ở admin/staff */}
       <Routes>
-        {/* User Routes - Có Header */}
-        <Route path="/" element={
-          <>
-            <Header />
-            <HomePage />
-          </>
+        <Route path="/admin/*" element={null} />
+        <Route path="/staff/*" element={null} />
+        <Route path="*" element={<Header />} />
+      </Routes>
+
+      <Routes>
+        {/* Public */}
+        <Route path="/" element={<HomePage />} />
+        <Route path="/menu" element={<MenuPage />} />
+        <Route path="/shop" element={<ShopPage />} />
+
+        {/* Auth user — nếu đã login thì redirect về đúng trang */}
+        <Route path="/auth" element={<UserAuthGuard><UserAuthPage /></UserAuthGuard>} />
+
+        {/* User protected */}
+        <Route path="/checkout" element={
+          <ProtectedUserRoute><CheckoutPage /></ProtectedUserRoute>
+        } />
+        <Route path="/my-orders" element={
+          <ProtectedUserRoute><UserOrdersPage /></ProtectedUserRoute>
         } />
 
-        <Route path="/menu" element={
-          <>
-            <Header />
-            <MenuPage />
-          </>
-        } />
-
-        <Route path="/services" element={
-          <>
-            <Header />
-            <ServicesPage />
-          </>
-        } />
-
-        <Route path="/blog" element={
-          <>
-            <Header />
-            <BlogPage />
-          </>
-        } />
-
-        <Route path="/about" element={
-          <>
-            <Header />
-            <AboutPage />
-          </>
-        } />
-
-        <Route path="/shop" element={
-          <>
-            <Header />
-            <ShopPage />
-          </>
-        } />
-
-        <Route path="/contact" element={
-          <>
-            <Header />
-            <ContactPage />
-          </>
-        } />
-
-        {/* Staff Route - KHÔNG có Header */}
-        <Route path="/staff" element={<StaffPage />} />
-
-        {/* Admin Routes - KHÔNG có Header */}
+        {/* Admin login — chỉ redirect nếu đã là ADMIN (ROLE_USER vẫn vào được) */}
         <Route path="/admin/login" element={
-          isAdminAuthenticated ? <Navigate to="/admin" /> : <AdminLogin />
+          <AdminLoginGuard><AdminLogin /></AdminLoginGuard>
         } />
 
-        <Route path="/admin/*" element={
-          <ProtectedRoute>
-            <AdminRoutes />
-          </ProtectedRoute>
+        {/* Admin panel */}
+        <Route path="/admin" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="dashboard" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/dashboard" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="dashboard" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/products" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="products" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/categories" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="categories" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/orders" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="orders" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/users" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="users" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/staff" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="staff" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/promotions" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="promotions" /></ProtectedAdminRoute>
+        } />
+        <Route path="/admin/settings" element={
+          <ProtectedAdminRoute><AdminLayoutWrapper page="settings" /></ProtectedAdminRoute>
         } />
 
-        {/* 404 Route */}
+        {/* Staff login — chỉ redirect nếu đã là STAFF/ADMIN */}
+        <Route path="/staff/login" element={
+          <StaffLoginGuard><StaffLoginPage /></StaffLoginGuard>
+        } />
+        <Route path="/staff" element={
+          <ProtectedStaffRoute><StaffPage /></ProtectedStaffRoute>
+        } />
+
+        {/* 404 */}
         <Route path="*" element={
-          <>
-            <Header />
-            <div className="min-h-screen bg-black pt-20 flex items-center justify-center">
-              <div className="text-center text-white">
-                <h1 className="text-6xl font-bold mb-4">404</h1>
-                <p className="text-xl mb-8">Trang không tồn tại</p>
-                <a href="/" className="bg-amber-600 hover:bg-amber-700 text-white px-6 py-3 rounded">
-                  Về Trang Chủ
-                </a>
-              </div>
-            </div>
-          </>
+          <div style={{
+            minHeight: '80vh', display: 'flex', alignItems: 'center',
+            justifyContent: 'center', flexDirection: 'column', gap: 16,
+            background: '#0a0a0a',
+          }}>
+            <div style={{ fontSize: 72, color: '#5a5550' }}>404</div>
+            <p style={{ color: '#8a8580' }}>Trang không tồn tại</p>
+            <a href="/" style={{
+              background: '#d4a853', color: '#0a0a0a',
+              padding: '10px 24px', borderRadius: 8,
+              textDecoration: 'none', fontWeight: 700,
+            }}>Về trang chủ</a>
+          </div>
         } />
       </Routes>
-    </div>
-  );
+    </>
+  )
 }
 
-export default App;
+export default function App() {
+  return (
+    <BrowserRouter>
+      <AppProvider>
+        <AppRoutes />
+      </AppProvider>
+    </BrowserRouter>
+  )
+}

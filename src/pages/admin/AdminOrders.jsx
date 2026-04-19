@@ -1,372 +1,276 @@
-import React, { useState } from 'react';
-import { Search, Eye, Trash2, Package, Clock, CheckCircle, XCircle, Filter } from 'lucide-react';
+// src/pages/admin/AdminOrders.jsx
+// ✅ BE endpoints:
+//   GET    /order              → List<Order> { id, total, status, orderedDate, user:{userName}, items:[{product,quantity,price}] }
+//   GET    /order/{id}         → Order (chi tiết có items)
+//   PUT    /order/{id}/status  → body: { status }  (PAYMENT_EXPECTED|PAID|SHIPPING|DELIVERED|CANCELLED)
+//   DELETE /order/{id}         → 200 OK
+// KHÔNG dùng JWT
 
-function AdminOrders() {
-    const [orders, setOrders] = useState([
-        {
-            id: 'DH001',
-            customer: { name: 'Nguyễn Văn A', phone: '0901234567', email: 'nguyenvana@gmail.com' },
-            items: [
-                { name: 'Cà Phê Cappuccino', quantity: 2, price: 45000 },
-                { name: 'Bánh Chocolate', quantity: 1, price: 55000 }
-            ],
-            total: 145000,
-            status: 'Chờ xử lý',
-            date: '10/10/2024',
-            time: '09:30',
-            address: '123 Nguyễn Huệ, Q1, TP.HCM',
-            note: 'Giao hàng buổi chiều'
-        },
-        {
-            id: 'DH002',
-            customer: { name: 'Trần Thị B', phone: '0912345678', email: 'tranthib@gmail.com' },
-            items: [
-                { name: 'Cà Phê Latte', quantity: 1, price: 42000 },
-                { name: 'Bít Tết Bò', quantity: 1, price: 189000 }
-            ],
-            total: 231000,
-            status: 'Đang giao',
-            date: '10/10/2024',
-            time: '10:15',
-            address: '456 Lê Lợi, Q1, TP.HCM',
-            note: ''
-        },
-        {
-            id: 'DH003',
-            customer: { name: 'Lê Văn C', phone: '0923456789', email: 'levanc@gmail.com' },
-            items: [
-                { name: 'Cà Phê Mocha', quantity: 3, price: 48000 },
-                { name: 'Nước Cam Tươi', quantity: 2, price: 35000 }
-            ],
-            total: 214000,
-            status: 'Hoàn thành',
-            date: '09/10/2024',
-            time: '14:20',
-            address: '789 Võ Văn Tần, Q3, TP.HCM',
-            note: ''
-        },
-        {
-            id: 'DH004',
-            customer: { name: 'Phạm Thị D', phone: '0934567890', email: 'phamthid@gmail.com' },
-            items: [
-                { name: 'Cà Phê Espresso', quantity: 2, price: 38000 }
-            ],
-            total: 76000,
-            status: 'Đã hủy',
-            date: '09/10/2024',
-            time: '11:45',
-            address: '321 Hai Bà Trưng, Q1, TP.HCM',
-            note: 'Khách hủy đơn'
+import React, { useState, useEffect, useCallback } from 'react'
+import { Search, Eye, Trash2, RefreshCw, ShoppingBag, X, ChevronDown } from 'lucide-react'
+import http from '../../services/api'
+
+const STATUS = {
+    PAYMENT_EXPECTED: { label: 'Chờ thanh toán', color: '#f59e0b', bg: 'rgba(245,158,11,0.15)' },
+    PAID: { label: 'Đã thanh toán', color: '#3b82f6', bg: 'rgba(59,130,246,0.15)' },
+    SHIPPING: { label: 'Đang giao', color: '#8b5cf6', bg: 'rgba(139,92,246,0.15)' },
+    DELIVERED: { label: 'Đã giao', color: '#22c55e', bg: 'rgba(34,197,94,0.15)' },
+    CANCELLED: { label: 'Đã hủy', color: '#ef4444', bg: 'rgba(239,68,68,0.15)' },
+}
+const STATUS_LIST = Object.keys(STATUS)
+
+const S = {
+    wrap: { padding: 24, color: '#f9fafb' },
+    card: { background: '#1f2937', border: '1px solid #374151', borderRadius: 12 },
+    th: { padding: '12px 16px', textAlign: 'left', fontSize: 11, color: '#6b7280', fontWeight: 600, textTransform: 'uppercase', background: '#111827' },
+    td: { padding: '12px 16px', borderTop: '1px solid #374151' },
+    input: { background: '#111827', color: '#f9fafb', border: '1px solid #374151', borderRadius: 8, padding: '9px 12px', fontSize: 13, outline: 'none' },
+}
+
+function Toast({ msg, type }) {
+    const c = type === 'error' ? '#ef4444' : '#22c55e'
+    return <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: '#1f2937', border: `1px solid ${c}`, borderLeft: `4px solid ${c}`, borderRadius: 10, padding: '12px 20px', color: '#f9fafb', fontSize: 13, maxWidth: 360 }}>{msg}</div>
+}
+
+function StatusBadge({ status }) {
+    const s = STATUS[status] || { label: status || '?', color: '#9ca3af', bg: 'rgba(156,163,175,0.15)' }
+    return <span style={{ display: 'inline-block', padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 600, background: s.bg, color: s.color }}>{s.label}</span>
+}
+
+export default function AdminOrders() {
+    const [orders, setOrders] = useState([])
+    const [loading, setLoading] = useState(true)
+    const [search, setSearch] = useState('')
+    const [statusF, setStatusF] = useState('all')
+    const [detail, setDetail] = useState(null)  // Order object
+    const [toast, setToast] = useState(null)
+
+    const showToast = (msg, type = 'success') => { setToast({ msg, type }); setTimeout(() => setToast(null), 3000) }
+
+    // ── GET /order ────────────────────────────────────────────
+    const fetchOrders = useCallback(async () => {
+        setLoading(true)
+        try {
+            const res = await http.get('/order')
+            const list = Array.isArray(res.data) ? res.data : []
+            setOrders(list.sort((a, b) => b.id - a.id))
+        } catch (e) {
+            if (e.response?.status === 404) setOrders([])
+            else showToast('Lỗi tải đơn hàng: ' + e.message, 'error')
+        } finally { setLoading(false) }
+    }, [])
+
+    useEffect(() => { fetchOrders() }, [fetchOrders])
+
+    // ── GET /order/{id} (detail với items) ───────────────────
+    const openDetail = async (o) => {
+        try {
+            const res = await http.get(`/order/${o.id}`)
+            setDetail(res.data || o)
+        } catch { setDetail(o) }
+    }
+
+    // ── PUT /order/{id}/status ────────────────────────────────
+    const updateStatus = async (orderId, newStatus) => {
+        try {
+            await http.put(`/order/${orderId}/status`, { status: newStatus })
+            setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: newStatus } : o))
+            if (detail?.id === orderId) setDetail(d => ({ ...d, status: newStatus }))
+            showToast('Cập nhật trạng thái thành công!')
+        } catch (e) {
+            showToast('Lỗi: ' + (e.response?.data?.message || e.message), 'error')
         }
-    ]);
+    }
 
-    const [searchTerm, setSearchTerm] = useState('');
-    const [statusFilter, setStatusFilter] = useState('Tất cả');
-    const [selectedOrder, setSelectedOrder] = useState(null);
-    const [showDetailModal, setShowDetailModal] = useState(false);
-
-    const statusOptions = ['Tất cả', 'Chờ xử lý', 'Đang giao', 'Hoàn thành', 'Đã hủy'];
-
-    const getStatusColor = (status) => {
-        switch (status) {
-            case 'Chờ xử lý': return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/50';
-            case 'Đang giao': return 'bg-blue-500/20 text-blue-400 border-blue-500/50';
-            case 'Hoàn thành': return 'bg-green-500/20 text-green-400 border-green-500/50';
-            case 'Đã hủy': return 'bg-red-500/20 text-red-400 border-red-500/50';
-            default: return 'bg-gray-500/20 text-gray-400 border-gray-500/50';
+    // ── DELETE /order/{id} ────────────────────────────────────
+    const deleteOrder = async (o) => {
+        if (!window.confirm(`Xóa đơn hàng #${o.id}?`)) return
+        try {
+            await http.delete(`/order/${o.id}`)
+            setOrders(prev => prev.filter(x => x.id !== o.id))
+            if (detail?.id === o.id) setDetail(null)
+            showToast('Đã xóa đơn hàng!')
+        } catch (e) {
+            showToast('Lỗi xóa: ' + (e.response?.data?.message || e.message), 'error')
         }
-    };
+    }
 
-    const getStatusIcon = (status) => {
-        switch (status) {
-            case 'Chờ xử lý': return <Clock className="w-4 h-4" />;
-            case 'Đang giao': return <Package className="w-4 h-4" />;
-            case 'Hoàn thành': return <CheckCircle className="w-4 h-4" />;
-            case 'Đã hủy': return <XCircle className="w-4 h-4" />;
-            default: return null;
-        }
-    };
+    const filtered = orders.filter(o => {
+        const q = search.toLowerCase()
+        const matchSearch = String(o.id).includes(q) || (o.user?.userName || '').toLowerCase().includes(q)
+        const matchStatus = statusF === 'all' || o.status === statusF
+        return matchSearch && matchStatus
+    })
 
-    const updateOrderStatus = (orderId, newStatus) => {
-        setOrders(orders.map(order =>
-            order.id === orderId ? { ...order, status: newStatus } : order
-        ));
-        if (selectedOrder?.id === orderId) {
-            setSelectedOrder({ ...selectedOrder, status: newStatus });
-        }
-    };
-
-    const deleteOrder = (orderId) => {
-        if (window.confirm('Bạn có chắc muốn xóa đơn hàng này?')) {
-            setOrders(orders.filter(order => order.id !== orderId));
-            if (selectedOrder?.id === orderId) {
-                setShowDetailModal(false);
-                setSelectedOrder(null);
-            }
-        }
-    };
-
-    const viewOrderDetail = (order) => {
-        setSelectedOrder(order);
-        setShowDetailModal(true);
-    };
-
-    const filteredOrders = orders.filter(order => {
-        const matchSearch = order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            order.customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            order.customer.phone.includes(searchTerm);
-        const matchStatus = statusFilter === 'Tất cả' || order.status === statusFilter;
-        return matchSearch && matchStatus;
-    });
-
-    const stats = {
-        total: orders.length,
-        pending: orders.filter(o => o.status === 'Chờ xử lý').length,
-        delivering: orders.filter(o => o.status === 'Đang giao').length,
-        completed: orders.filter(o => o.status === 'Hoàn thành').length,
-        cancelled: orders.filter(o => o.status === 'Đã hủy').length
-    };
+    // Summary counts
+    const counts = {}
+    STATUS_LIST.forEach(s => counts[s] = orders.filter(o => o.status === s).length)
 
     return (
-        <div className="p-6">
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-white mb-2">Quản Lý Đơn Hàng</h1>
-                <p className="text-gray-400">Theo dõi và xử lý đơn hàng của khách</p>
+        <div style={S.wrap}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 24 }}>
+                <div>
+                    <h1 style={{ fontSize: 24, fontWeight: 700, margin: 0, marginBottom: 4 }}>Quản Lý Đơn Hàng</h1>
+                    <p style={{ color: '#6b7280', fontSize: 13, margin: 0 }}>{orders.length} đơn hàng tổng cộng</p>
+                </div>
+                <button onClick={fetchOrders} style={{ background: '#374151', color: '#d1d5db', border: 'none', borderRadius: 8, padding: '8px 14px', cursor: 'pointer', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <RefreshCw size={13} />Làm mới
+                </button>
             </div>
 
-            {/* Stats Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
-                <div className="bg-gray-800 border border-gray-700 rounded-lg p-4">
-                    <div className="text-gray-400 text-sm mb-1">Tổng đơn</div>
-                    <div className="text-2xl font-bold text-white">{stats.total}</div>
-                </div>
-                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-4">
-                    <div className="text-yellow-400 text-sm mb-1">Chờ xử lý</div>
-                    <div className="text-2xl font-bold text-yellow-400">{stats.pending}</div>
-                </div>
-                <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-                    <div className="text-blue-400 text-sm mb-1">Đang giao</div>
-                    <div className="text-2xl font-bold text-blue-400">{stats.delivering}</div>
-                </div>
-                <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
-                    <div className="text-green-400 text-sm mb-1">Hoàn thành</div>
-                    <div className="text-2xl font-bold text-green-400">{stats.completed}</div>
-                </div>
-                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4">
-                    <div className="text-red-400 text-sm mb-1">Đã hủy</div>
-                    <div className="text-2xl font-bold text-red-400">{stats.cancelled}</div>
-                </div>
+            {/* Status summary cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: 10, marginBottom: 20 }}>
+                {STATUS_LIST.map(s => {
+                    const si = STATUS[s]
+                    return (
+                        <button key={s} onClick={() => setStatusF(statusF === s ? 'all' : s)} style={{
+                            background: statusF === s ? si.bg : '#1f2937',
+                            border: `1px solid ${statusF === s ? si.color : '#374151'}`,
+                            borderRadius: 10, padding: '12px 14px', cursor: 'pointer', textAlign: 'left',
+                        }}>
+                            <div style={{ fontSize: 11, color: '#6b7280', marginBottom: 2 }}>{si.label}</div>
+                            <div style={{ fontSize: 20, fontWeight: 700, color: si.color }}>{counts[s] || 0}</div>
+                        </button>
+                    )
+                })}
             </div>
 
-            {/* Search & Filter */}
-            <div className="flex flex-col md:flex-row gap-4 mb-6">
-                <div className="flex-1 relative">
-                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input
-                        type="text"
-                        placeholder="Tìm mã đơn, tên khách, số điện thoại..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="w-full bg-gray-800 text-white pl-12 pr-4 py-3 rounded-lg border border-gray-700 focus:border-amber-500 outline-none"
-                    />
+            {/* Search + filter */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+                <div style={{ flex: 1, position: 'relative' }}>
+                    <Search size={14} color="#6b7280" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+                    <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Tìm mã đơn, tên khách..."
+                        style={{ ...S.input, width: '100%', paddingLeft: 34, boxSizing: 'border-box' }} />
                 </div>
-                <div className="relative">
-                    <Filter className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <select
-                        value={statusFilter}
-                        onChange={(e) => setStatusFilter(e.target.value)}
-                        className="bg-gray-800 text-white pl-12 pr-8 py-3 rounded-lg border border-gray-700 focus:border-amber-500 outline-none appearance-none min-w-[200px]"
-                    >
-                        {statusOptions.map(status => (
-                            <option key={status} value={status}>{status}</option>
-                        ))}
-                    </select>
-                </div>
+                <select value={statusF} onChange={e => setStatusF(e.target.value)} style={{ ...S.input }}>
+                    <option value="all">Tất cả trạng thái</option>
+                    {STATUS_LIST.map(s => <option key={s} value={s}>{STATUS[s].label}</option>)}
+                </select>
             </div>
 
-            {/* Orders Table */}
-            <div className="bg-gray-800 rounded-lg border border-gray-700 overflow-hidden">
-                <div className="overflow-x-auto">
-                    <table className="w-full">
-                        <thead className="bg-gray-900">
+            {/* Table */}
+            <div style={{ ...S.card, overflow: 'hidden' }}>
+                {loading ? (
+                    <div style={{ padding: 60, textAlign: 'center' }}>
+                        <div style={{ width: 32, height: 32, border: '3px solid #374151', borderTopColor: '#22c55e', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto 10px' }} />
+                        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+                        <p style={{ color: '#6b7280', fontSize: 13 }}>Đang tải...</p>
+                    </div>
+                ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                        <thead>
                             <tr>
-                                <th className="px-6 py-4 text-left text-white font-semibold">Mã đơn</th>
-                                <th className="px-6 py-4 text-left text-white font-semibold">Khách hàng</th>
-                                <th className="px-6 py-4 text-left text-white font-semibold">Ngày giờ</th>
-                                <th className="px-6 py-4 text-left text-white font-semibold">Tổng tiền</th>
-                                <th className="px-6 py-4 text-left text-white font-semibold">Trạng thái</th>
-                                <th className="px-6 py-4 text-center text-white font-semibold">Thao tác</th>
+                                {['Mã đơn', 'Khách hàng', 'Ngày đặt', 'Tổng tiền', 'Trạng thái', 'Cập nhật status', 'Thao tác'].map(h => (
+                                    <th key={h} style={S.th}>{h}</th>
+                                ))}
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-700">
-                            {filteredOrders.length === 0 ? (
-                                <tr>
-                                    <td colSpan="6" className="px-6 py-12 text-center text-gray-400">
-                                        Không tìm thấy đơn hàng nào
+                        <tbody>
+                            {filtered.length === 0 ? (
+                                <tr><td colSpan={7} style={{ ...S.td, textAlign: 'center', color: '#6b7280', padding: 40 }}>
+                                    <ShoppingBag size={40} style={{ opacity: 0.3, margin: '0 auto 10px', display: 'block' }} />
+                                    Không có đơn hàng nào
+                                </td></tr>
+                            ) : filtered.map((o, i) => (
+                                <tr key={o.id} style={{ background: i % 2 === 1 ? '#111827' : 'transparent' }}>
+                                    <td style={{ ...S.td, color: '#f59e0b', fontWeight: 700 }}>#{o.id}</td>
+                                    <td style={{ ...S.td, fontSize: 13 }}>{o.user?.userName || 'Khách'}</td>
+                                    <td style={{ ...S.td, fontSize: 12, color: '#9ca3af' }}>{o.orderedDate || '—'}</td>
+                                    <td style={{ ...S.td, color: '#f59e0b', fontWeight: 700 }}>
+                                        {Number(o.total || 0).toLocaleString('vi-VN')}đ
+                                    </td>
+                                    <td style={S.td}><StatusBadge status={o.status} /></td>
+                                    <td style={S.td}>
+                                        <select value={o.status || ''} onChange={e => updateStatus(o.id, e.target.value)}
+                                            style={{ background: '#111827', color: '#f9fafb', border: '1px solid #374151', borderRadius: 6, padding: '5px 8px', fontSize: 11, outline: 'none', cursor: 'pointer' }}>
+                                            {STATUS_LIST.map(s => (
+                                                <option key={s} value={s}>{STATUS[s].label}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                    <td style={S.td}>
+                                        <div style={{ display: 'flex', gap: 6 }}>
+                                            <button onClick={() => openDetail(o)} style={{ width: 30, height: 30, background: 'rgba(59,130,246,0.15)', color: '#3b82f6', border: 'none', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Xem chi tiết"><Eye size={13} /></button>
+                                            <button onClick={() => deleteOrder(o)} style={{ width: 30, height: 30, background: 'rgba(239,68,68,0.15)', color: '#ef4444', border: 'none', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }} title="Xóa"><Trash2 size={13} /></button>
+                                        </div>
                                     </td>
                                 </tr>
-                            ) : (
-                                filteredOrders.map(order => (
-                                    <tr key={order.id} className="hover:bg-gray-700/50 transition-colors">
-                                        <td className="px-6 py-4">
-                                            <div className="text-amber-400 font-bold">{order.id}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="text-white font-medium">{order.customer.name}</div>
-                                            <div className="text-gray-400 text-sm">{order.customer.phone}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="text-white">{order.date}</div>
-                                            <div className="text-gray-400 text-sm">{order.time}</div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="text-amber-500 font-bold">
-                                                {order.total.toLocaleString('vi-VN')}đ
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(order.status)}`}>
-                                                {getStatusIcon(order.status)}
-                                                {order.status}
-                                            </span>
-                                        </td>
-                                        <td className="px-6 py-4">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <button
-                                                    onClick={() => viewOrderDetail(order)}
-                                                    className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded transition-colors"
-                                                    title="Xem chi tiết"
-                                                >
-                                                    <Eye className="w-4 h-4" />
-                                                </button>
-                                                <button
-                                                    onClick={() => deleteOrder(order.id)}
-                                                    className="p-2 bg-red-600 hover:bg-red-700 text-white rounded transition-colors"
-                                                    title="Xóa đơn"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                ))
-                            )}
+                            ))}
                         </tbody>
                     </table>
-                </div>
+                )}
             </div>
 
-            {/* Order Detail Modal */}
-            {showDetailModal && selectedOrder && (
-                <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
-                    <div className="bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
-                        <div className="p-6 border-b border-gray-700">
-                            <div className="flex items-center justify-between mb-4">
-                                <h2 className="text-2xl font-bold text-white">Chi Tiết Đơn Hàng</h2>
-                                <button
-                                    onClick={() => setShowDetailModal(false)}
-                                    className="text-gray-400 hover:text-white"
-                                >
-                                    ✕
-                                </button>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <span className="text-amber-400 font-bold text-lg">{selectedOrder.id}</span>
-                                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-sm font-medium border ${getStatusColor(selectedOrder.status)}`}>
-                                    {getStatusIcon(selectedOrder.status)}
-                                    {selectedOrder.status}
-                                </span>
-                            </div>
+            {/* Detail modal */}
+            {detail && (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: 16 }} onClick={() => setDetail(null)}>
+                    <div style={{ ...S.card, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '16px 20px', borderBottom: '1px solid #374151', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 700 }}>Đơn Hàng #{detail.id}</h2>
+                            <button onClick={() => setDetail(null)} style={{ background: 'none', border: 'none', color: '#6b7280', cursor: 'pointer' }}><X size={18} /></button>
                         </div>
-
-                        <div className="p-6 space-y-6">
-                            {/* Customer Info */}
-                            <div>
-                                <h3 className="text-white font-bold mb-3">Thông Tin Khách Hàng</h3>
-                                <div className="bg-gray-900 rounded-lg p-4 space-y-2">
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-400">Họ tên:</span>
-                                        <span className="text-white font-medium">{selectedOrder.customer.name}</span>
+                        <div style={{ padding: 20 }}>
+                            {/* Info */}
+                            <div style={{ background: '#111827', borderRadius: 10, padding: 16, marginBottom: 16 }}>
+                                {[
+                                    ['Khách hàng', detail.user?.userName || 'Khách'],
+                                    ['Ngày đặt', detail.orderedDate || '—'],
+                                    ['Tổng tiền', Number(detail.total || 0).toLocaleString('vi-VN') + 'đ'],
+                                    ['Trạng thái', null], // render badge
+                                ].map(([k, v]) => (
+                                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #1f2937' }}>
+                                        <span style={{ color: '#6b7280', fontSize: 13 }}>{k}</span>
+                                        {v !== null
+                                            ? <span style={{ color: '#f9fafb', fontWeight: 600, fontSize: 13 }}>{v}</span>
+                                            : <StatusBadge status={detail.status} />
+                                        }
                                     </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-400">Điện thoại:</span>
-                                        <span className="text-white font-medium">{selectedOrder.customer.phone}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-400">Email:</span>
-                                        <span className="text-white font-medium">{selectedOrder.customer.email}</span>
-                                    </div>
-                                    <div className="flex justify-between">
-                                        <span className="text-gray-400">Địa chỉ:</span>
-                                        <span className="text-white font-medium text-right">{selectedOrder.address}</span>
-                                    </div>
-                                </div>
+                                ))}
                             </div>
 
-                            {/* Order Items */}
-                            <div>
-                                <h3 className="text-white font-bold mb-3">Sản Phẩm Đã Đặt</h3>
-                                <div className="space-y-2">
-                                    {selectedOrder.items.map((item, index) => (
-                                        <div key={index} className="bg-gray-900 rounded-lg p-4 flex justify-between items-center">
-                                            <div>
-                                                <div className="text-white font-medium">{item.name}</div>
-                                                <div className="text-gray-400 text-sm">Số lượng: {item.quantity}</div>
+                            {/* Items */}
+                            {detail.items && detail.items.length > 0 && (
+                                <div style={{ marginBottom: 16 }}>
+                                    <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Sản phẩm đặt</div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                        {detail.items.map((item, i) => (
+                                            <div key={i} style={{ background: '#111827', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                <div>
+                                                    <div style={{ fontWeight: 600, fontSize: 13 }}>{item.product?.productName || item.productName || `Sản phẩm #${item.productId || i}`}</div>
+                                                    <div style={{ color: '#6b7280', fontSize: 12 }}>x{item.quantity}</div>
+                                                </div>
+                                                <div style={{ color: '#f59e0b', fontWeight: 700 }}>
+                                                    {Number((item.price || 0) * (item.quantity || 1)).toLocaleString('vi-VN')}đ
+                                                </div>
                                             </div>
-                                            <div className="text-amber-500 font-bold">
-                                                {(item.price * item.quantity).toLocaleString('vi-VN')}đ
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Order Summary */}
-                            <div className="bg-gray-900 rounded-lg p-4">
-                                <div className="flex justify-between mb-2">
-                                    <span className="text-gray-400">Ngày đặt:</span>
-                                    <span className="text-white">{selectedOrder.date} - {selectedOrder.time}</span>
-                                </div>
-                                {selectedOrder.note && (
-                                    <div className="flex justify-between mb-2">
-                                        <span className="text-gray-400">Ghi chú:</span>
-                                        <span className="text-white text-right">{selectedOrder.note}</span>
-                                    </div>
-                                )}
-                                <div className="border-t border-gray-700 pt-2 mt-2">
-                                    <div className="flex justify-between items-center">
-                                        <span className="text-white font-bold text-lg">Tổng cộng:</span>
-                                        <span className="text-amber-500 font-bold text-2xl">
-                                            {selectedOrder.total.toLocaleString('vi-VN')}đ
-                                        </span>
+                                        ))}
                                     </div>
                                 </div>
-                            </div>
+                            )}
 
-                            {/* Update Status */}
+                            {/* Update status */}
                             <div>
-                                <h3 className="text-white font-bold mb-3">Cập Nhật Trạng Thái</h3>
-                                <div className="grid grid-cols-2 gap-3">
-                                    {statusOptions.filter(s => s !== 'Tất cả').map(status => (
-                                        <button
-                                            key={status}
-                                            onClick={() => updateOrderStatus(selectedOrder.id, status)}
-                                            className={`py-2 px-4 rounded-lg font-medium transition-colors ${selectedOrder.status === status
-                                                    ? 'bg-amber-600 text-white'
-                                                    : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                                                }`}
-                                        >
-                                            {status}
-                                        </button>
-                                    ))}
+                                <div style={{ fontWeight: 600, marginBottom: 10, fontSize: 14 }}>Cập nhật trạng thái</div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                                    {STATUS_LIST.map(s => {
+                                        const si = STATUS[s]
+                                        const active = detail.status === s
+                                        return (
+                                            <button key={s} onClick={() => updateStatus(detail.id, s)} disabled={active}
+                                                style={{ padding: '9px 12px', borderRadius: 8, border: `1px solid ${active ? si.color : '#374151'}`, background: active ? si.bg : '#111827', color: active ? si.color : '#9ca3af', cursor: active ? 'not-allowed' : 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s' }}>
+                                                {si.label}
+                                            </button>
+                                        )
+                                    })}
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
             )}
-        </div>
-    );
-}
 
-export default AdminOrders;
+            {toast && <Toast {...toast} />}
+        </div>
+    )
+}
