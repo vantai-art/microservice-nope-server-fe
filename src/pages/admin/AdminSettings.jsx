@@ -36,7 +36,7 @@ function AdminSettings() {
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState(null);
 
-    const getToken = () => localStorage.getItem("admin_token") || localStorage.getItem("staff_token");
+    // FIX: không cần getToken — axiosInstance dùng withCredentials
 
     // Fetch settings from API
     const fetchSettings = async () => {
@@ -44,17 +44,7 @@ function AdminSettings() {
         setError(null);
 
         try {
-            const token = getToken();
-            if (!token) {
-                throw new Error("Không tìm thấy token xác thực");
-            }
-
-            const response = await axiosInstance.get('/settings', {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
+            const response = await axiosInstance.get('/settings');
 
             const data = response.data?.data || response.data;
 
@@ -120,11 +110,6 @@ function AdminSettings() {
         setError(null);
 
         try {
-            const token = getToken();
-            if (!token) {
-                throw new Error("Không tìm thấy token xác thực");
-            }
-
             // Convert settings object to array format for API
             const settingsArray = Object.keys(settings).map(key => ({
                 key: key,
@@ -134,24 +119,14 @@ function AdminSettings() {
             }));
 
             // Try to update existing settings
-            await axiosInstance.put('/settings', settingsArray, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            }).catch(async (updateErr) => {
-                // If PUT fails (404), try POST to create
-                if (updateErr.response?.status === 404) {
-                    await axiosInstance.post('/settings', settingsArray, {
-                        headers: {
-                            'Authorization': `Bearer ${token}`,
-                            'Content-Type': 'application/json'
-                        }
-                    });
-                } else {
-                    throw updateErr;
-                }
-            });
+            await axiosInstance.put('/settings', settingsArray)
+                .catch(async (updateErr) => {
+                    if (updateErr.response?.status === 404) {
+                        await axiosInstance.post('/settings', settingsArray);
+                    } else {
+                        throw updateErr;
+                    }
+                });
 
             // Save to localStorage as backup
             localStorage.setItem("darkMode", settings.darkMode);
@@ -181,6 +156,7 @@ function AdminSettings() {
     };
 
     // Load settings on mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => {
         fetchSettings();
     }, []);

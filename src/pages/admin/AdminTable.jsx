@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
+import { useAppContext } from "../../contexts/AppContext";
 import { Plus, Edit2, Trash2, Search, X, AlertCircle, CheckCircle } from "lucide-react";
 
 function AdminTable() {
+    const { axiosInstance } = useAppContext();
     const [tables, setTables] = useState([]);
     const [searchTerm, setSearchTerm] = useState("");
     const [showModal, setShowModal] = useState(false);
@@ -17,12 +19,8 @@ function AdminTable() {
 
     const API_BASE = "http://localhost:8080/api";
 
-    // ✅ Lấy token từ localStorage
-    const getToken = () => {
-        return localStorage.getItem("admin_token") ||
-            localStorage.getItem("staff_token") ||
-            localStorage.getItem("user_token");
-    };
+    // FIX: dùng axiosInstance từ AppContext (withCredentials) thay vì Bearer token cũ
+    const getToken = () => null; // không dùng nữa, giữ để tránh lỗi tham chiếu
 
     // ✅ Helper: Parse JSON an toàn
     const safeJsonParse = async (response) => {
@@ -49,25 +47,8 @@ function AdminTable() {
                 throw new Error("Chưa đăng nhập!");
             }
 
-            const res = await fetch(`${API_BASE}/tables`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                }
-            });
-
-            console.log('📡 Fetch tables status:', res.status);
-
-            if (!res.ok) {
-                if (res.status === 401) {
-                    localStorage.removeItem('admin_token');
-                    localStorage.removeItem('staff_token');
-                    throw new Error("Phiên hết hạn! Vui lòng đăng nhập lại.");
-                }
-                throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-            }
-
-            const data = await safeJsonParse(res);
+            const res = await axiosInstance.get('/tables');
+            const data = res.data;
             setTables(Array.isArray(data) ? data : []);
             console.log("✅ Loaded tables:", Array.isArray(data) ? data.length : 0);
         } catch (err) {
@@ -123,38 +104,11 @@ function AdminTable() {
         console.log('📤 Payload:', payload);
 
         try {
-            const res = await fetch(url, {
-                method,
-                headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                },
-                body: JSON.stringify(payload),
-            });
-
-            console.log('📡 Submit status:', res.status);
-
-            if (!res.ok) {
-                if (res.status === 401) {
-                    localStorage.removeItem('admin_token');
-                    throw new Error("Phiên hết hạn!");
-                }
-
-                let errorMessage = `HTTP ${res.status}: ${res.statusText}`;
-                const data = await safeJsonParse(res);
-
-                if (data?.message) {
-                    errorMessage = data.message;
-                } else {
-                    const text = await res.text();
-                    if (text) errorMessage = text;
-                }
-
-                throw new Error(errorMessage);
-            }
-
-            // ✅ Parse JSON an toàn
-            const data = await safeJsonParse(res);
+            const axiosCall = editing
+                ? axiosInstance.put(`/tables/${editing.id}`, payload)
+                : axiosInstance.post('/tables', payload);
+            const res = await axiosCall;
+            const data = res.data;
             console.log("✅ Saved table:", data);
 
             setSuccess(editing ? "Cập nhật bàn thành công!" : "Thêm bàn mới thành công!");
@@ -184,49 +138,13 @@ function AdminTable() {
         setError(null);
 
         try {
-            const token = getToken();
-
-            if (!token) {
-                throw new Error("Chưa đăng nhập!");
-            }
-
             console.log('🗑️ Deleting table:', id);
 
-            const res = await fetch(`${API_BASE}/tables/${id}`, {
-                method: "DELETE",
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json'
-                },
-            });
-
-            console.log('📡 Delete status:', res.status);
-
-            // ✅ Chấp nhận cả 200 OK và 204 No Content
-            if (res.ok || res.status === 204) {
-                console.log("✅ Deleted table:", id);
-                setSuccess(`Đã xóa Bàn ${tableNumber} thành công!`);
-                await fetchTables();
-                setTimeout(() => setSuccess(null), 3000);
-            } else {
-                if (res.status === 401) {
-                    localStorage.removeItem('admin_token');
-                    throw new Error("Phiên hết hạn!");
-                }
-
-                let errorMsg = `HTTP ${res.status}: ${res.statusText}`;
-
-                // ✅ Parse JSON an toàn
-                const data = await safeJsonParse(res);
-                if (data?.message) {
-                    errorMsg = data.message;
-                } else {
-                    const text = await res.text();
-                    if (text) errorMsg = text;
-                }
-
-                throw new Error(errorMsg);
-            }
+            await axiosInstance.delete(`/tables/${id}`);
+            console.log("✅ Deleted table:", id);
+            setSuccess(`Đã xóa Bàn ${tableNumber} thành công!`);
+            await fetchTables();
+            setTimeout(() => setSuccess(null), 3000);
         } catch (err) {
             console.error("❌ Lỗi xóa bàn:", err);
             setError(err.message || "Không thể xóa bàn. Vui lòng thử lại!");

@@ -35,14 +35,14 @@ const MENU = [
 
 function AdminLayout({ currentPage, setCurrentPage, onLogout }) {
     const navigate = useNavigate()
-    const { user } = useAppContext?.() || {}
+    const { adminUser, logout } = useAppContext?.() || {}
     const [sidebarOpen, setSidebarOpen] = useState(true)
 
     const handleLogout = () => {
         if (window.confirm('Bạn có chắc muốn đăng xuất?')) {
-            localStorage.removeItem('isAdminAuth')
-            localStorage.removeItem('jwt_token')
-            localStorage.removeItem('user')
+            // FIX: dùng logout('ROLE_ADMIN') thay vì xoá thủ công
+            
+            logout('ROLE_ADMIN')
             onLogout?.()
             navigate('/admin/login')
         }
@@ -170,7 +170,7 @@ function AdminLayout({ currentPage, setCurrentPage, onLogout }) {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
                         <div style={{ textAlign: 'right' }}>
                             <div style={{ color: '#f9fafb', fontSize: 13, fontWeight: 600 }}>
-                                {user?.userName || 'Admin'}
+                                {adminUser?.userName || 'Admin'}
                             </div>
                             <div style={{ color: '#6b7280', fontSize: 11 }}>
                                 {new Date().toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' })}
@@ -182,7 +182,7 @@ function AdminLayout({ currentPage, setCurrentPage, onLogout }) {
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
                             color: '#f59e0b', fontWeight: 700, fontSize: 14,
                         }}>
-                            {(user?.userName || 'A')[0].toUpperCase()}
+                            {(adminUser?.userName || 'A')[0].toUpperCase()}
                         </div>
                     </div>
                 </header>

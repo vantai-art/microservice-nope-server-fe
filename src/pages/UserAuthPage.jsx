@@ -63,14 +63,22 @@ export default function UserAuthPage() {
             const res = await apiLogin(loginData.userName, loginData.userPassword)
             const data = res.data
             if (!data?.id) throw new Error('Phản hồi không hợp lệ')
+            // FIX: Trang này chỉ dành cho customer (ROLE_USER)
+            // Admin → /admin/login | Staff → /staff/login
+            const role = data.role || 'ROLE_USER'
+            if (role === 'ROLE_ADMIN') {
+                setError('Vui lòng đăng nhập tại trang Admin: /admin/login')
+                setLoading(false)
+                return
+            }
+            if (role === 'ROLE_STAFF') {
+                setError('Vui lòng đăng nhập tại trang Nhân viên: /staff/login')
+                setLoading(false)
+                return
+            }
             login(data)
             setSuccess('Đăng nhập thành công!')
-            setTimeout(() => {
-                const role = data.role || ''
-                if (role === 'ROLE_ADMIN') { navigate('/admin'); return }
-                if (role === 'ROLE_STAFF') { navigate('/staff'); return }
-                navigate('/')
-            }, 700)
+            setTimeout(() => navigate('/'), 700)
         } catch (err) {
             setError(err.response?.data?.message || err.message || 'Sai tên đăng nhập hoặc mật khẩu')
         } finally { setLoading(false) }

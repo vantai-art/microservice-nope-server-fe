@@ -1,9 +1,6 @@
-// src/pages/admin/AdminLogin.jsx  ← ĐÃ SỬA
-// Lỗi cũ:
-//  1. Gọi /api/auth/login — KHÔNG TỒN TẠI trong BE
-//     BE thực tế: POST /login với body { userName, userPassword }
-//  2. Expect token JWT — BE KHÔNG trả JWT, trả về object user trực tiếp
-//  3. Check role === "ADMIN" — BE trả "ROLE_ADMIN"
+// src/pages/admin/AdminLogin.jsx
+// FIX: dùng adminUser từ context (không dùng chung user với customer)
+//      login() tự lưu vào localStorage['admin_user']
 
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -15,30 +12,26 @@ function AdminLogin() {
     const navigate = useNavigate()
     const { login } = useApp()
     const [formData, setFormData] = useState({ userName: '', userPassword: '' })
-    const [error, setError] = useState('')
+    const [error, setError]     = useState('')
     const [loading, setLoading] = useState(false)
 
     const handleSubmit = async (e) => {
         e.preventDefault()
         setError('')
         setLoading(true)
-
         try {
-            // POST /login → { id, userName, role, userDetails, active }
-            const res = await apiLogin(formData.userName, formData.userPassword)
+            const res  = await apiLogin(formData.userName, formData.userPassword)
             const data = res.data
 
             if (!data || !data.id) throw new Error('Phản hồi không hợp lệ từ server')
 
-            // BE trả role là "ROLE_ADMIN"
             const role = data.role || ''
             if (role !== 'ROLE_ADMIN') {
                 throw new Error('Tài khoản này không có quyền Admin!')
             }
 
-            // Lưu vào context (context tự lưu localStorage['user'])
+            // login() tự nhận biết ROLE_ADMIN → lưu vào localStorage['admin_user']
             login(data)
-
             navigate('/admin', { replace: true })
 
         } catch (err) {
@@ -78,7 +71,7 @@ function AdminLogin() {
                                     value={formData.userName}
                                     onChange={e => setFormData({ ...formData, userName: e.target.value })}
                                     className="w-full bg-gray-700 text-white pl-12 pr-4 py-3 rounded-lg border border-gray-600 focus:border-amber-500 outline-none"
-                                    placeholder="Nhập tên đăng nhập"
+                                    placeholder="Nhập tên đăng nhập admin"
                                     required
                                 />
                             </div>

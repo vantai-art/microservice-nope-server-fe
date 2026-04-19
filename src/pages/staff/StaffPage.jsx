@@ -605,7 +605,7 @@ ${method === "CASH" ? `<div class="row"><span>Tiền nhận:</span><span>${recei
 /* ─── MAIN COMPONENT ─────────────────────────────────────────── */
 export default function StaffPage() {
     const navigate = useNavigate();
-    const { user, logout, products: ctxProducts, tables: ctxTables, cart, addToCart,
+    const { staffUser: user, logout, products: ctxProducts, tables: ctxTables, cart, addToCart,
         updateQuantity, removeFromCart, clearCart, cartTotal, axiosInstance } = useAppContext();
 
     const displayName = user?.userDetails?.fullName || user?.userName || "Nhân viên";
@@ -638,7 +638,7 @@ export default function StaffPage() {
             setTables(Array.isArray(d) ? d : []);
         } catch (e) {
             console.error(e);
-            if (e.response?.status === 401) { logout(); navigate("/staff/login"); }
+            if (e.response?.status === 401) { logout("ROLE_STAFF"); navigate("/staff/login"); }
         } finally { setLoadingTables(false); }
     }, [axiosInstance, logout, navigate]);
 
@@ -708,7 +708,7 @@ export default function StaffPage() {
         setPendingOrder(null); clearCart(); setSelectedTable(null); setCustomerName(""); fetchTables();
     };
 
-    const handleLogout = () => { if (!window.confirm("Đăng xuất?")) return; logout(); navigate("/staff/login"); };
+    const handleLogout = () => { if (!window.confirm("Đăng xuất?")) return; logout("ROLE_STAFF"); navigate("/staff/login"); };
 
     const categories = ["Tất cả", ...new Set(products.map(p => p.category?.name).filter(Boolean))];
     const filtered = products.filter(p => {

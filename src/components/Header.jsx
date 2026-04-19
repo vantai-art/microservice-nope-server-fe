@@ -13,7 +13,11 @@ const NAV = [
 export default function Header() {
     const navigate = useNavigate()
     const location = useLocation()
-    const { user, logout, cart, isAdmin, isStaff } = useApp()
+    const { customerUser: user, logout, cart } = useApp()
+    // Header chỉ hiển thị cho customer — KHÔNG check adminUser/staffUser
+    // Admin/Staff có trang riêng, không hiển thị qua Header này
+    const isAdmin = user?.role === 'ROLE_ADMIN'
+    const isStaff = user?.role === 'ROLE_STAFF'
     const [scrolled, setScrolled] = useState(false)
     const [showCart, setShowCart] = useState(false)
     const [mobileOpen, setMobileOpen] = useState(false)
@@ -40,7 +44,7 @@ export default function Header() {
     const cartCount = cart.reduce((s, i) => s + i.quantity, 0)
 
     const handleLogout = () => {
-        logout()
+        logout("ROLE_USER")
         setUserMenuOpen(false)
         navigate('/')
     }
@@ -156,13 +160,11 @@ export default function Header() {
                                         <div style={{ padding: '12px 16px', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
                                             <div style={{ color: '#f5efe6', fontSize: 13, fontWeight: 600 }}>{user.userName}</div>
                                             <div style={{ color: 'rgba(245,239,230,0.4)', fontSize: 11, marginTop: 2 }}>
-                                                {isAdmin ? 'Quản trị viên' : isStaff ? 'Nhân viên' : 'Thành viên'}
+                                                {'Thành viên'}
                                             </div>
                                         </div>
                                         {[
-                                            { label: '📦 Đơn hàng của tôi', path: '/my-orders', show: !isAdmin && !isStaff },
-                                            { label: '🛡️ Bảng Admin', path: '/admin', show: isAdmin },
-                                            { label: '👷 Nhân viên', path: '/staff', show: isStaff },
+                                            { label: '📦 Đơn hàng của tôi', path: '/my-orders', show: true },
                                         ].filter(i => i.show).map(item => (
                                             <button key={item.path} onClick={() => { navigate(item.path); setUserMenuOpen(false) }} style={{
                                                 display: 'block', width: '100%', padding: '10px 16px', background: 'none',

@@ -20,9 +20,21 @@ export const http = axios.create({
 })
 
 // ─── Auth local helpers ──────────────────────────────────────────
-export const getUser = () => { try { return JSON.parse(localStorage.getItem('user')) } catch { return null } }
-export const setUser = (u) => localStorage.setItem('user', JSON.stringify(u))
-export const removeUser = () => { localStorage.removeItem('user'); localStorage.removeItem('cartId') }
+// FIX: Per-role localStorage helpers — dùng AppContext.login/logout thay vì gọi trực tiếp
+export const getUser     = (role) => {
+    const key = role === 'ROLE_ADMIN' ? 'admin_user' : role === 'ROLE_STAFF' ? 'staff_user' : 'customer_user'
+    try { return JSON.parse(localStorage.getItem(key)) } catch { return null }
+}
+export const setUser     = (u) => {
+    const role = u?.role || 'ROLE_USER'
+    const key  = role === 'ROLE_ADMIN' ? 'admin_user' : role === 'ROLE_STAFF' ? 'staff_user' : 'customer_user'
+    localStorage.setItem(key, JSON.stringify(u))
+}
+export const removeUser  = (role) => {
+    if (role === 'ROLE_ADMIN')  localStorage.removeItem('admin_user')
+    else if (role === 'ROLE_STAFF') localStorage.removeItem('staff_user')
+    else { localStorage.removeItem('customer_user'); localStorage.removeItem('cartId') }
+}
 export const getCartId = () => localStorage.getItem('cartId') || ''
 export const setCartId = (id) => localStorage.setItem('cartId', String(id))
 
